@@ -1,6 +1,6 @@
 {
-  "name": "Copy of Smart Traffic Watch",
-  "description": "A sophisticated traffic monitoring dashboard that uses Gemini AI to analyze live camera feeds for road congestion and integrates Google Maps grounding for localized traffic insights.",
+  "name": "TRAFFIC COMMAND OS",
+  "description": "Next-generation traffic surveillance matrix. Real-time New Zealand camera integration, AI-driven congestion analysis, and tactical route projection.",
   "requestFramePermissions": [
     "geolocation",
     "microphone"

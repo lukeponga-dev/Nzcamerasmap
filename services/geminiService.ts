@@ -1,5 +1,4 @@
 
-// Fix: remove responseMimeType and responseSchema from googleMaps tool usage per guidelines.
 import { GoogleGenAI, Type, Modality, LiveServerMessage } from "@google/genai";
 import { CongestionAnalysis, MapGroundingResult, SearchGroundingResult, AdvancedIntelligence } from "../types";
 
@@ -18,22 +17,55 @@ export class GeminiService {
     this.cache.set(key, value);
   }
 
+  /**
+   * Proxies image fetch to bypass CORS for client-side AI analysis
+   */
+  private async fetchImageAsBase64(url: string): Promise<{ data: string, mimeType: string } | null> {
+    const proxies = [
+      'https://api.allorigins.win/get?url=',
+      'https://corsproxy.io/?url=',
+    ];
+
+    for (const proxy of proxies) {
+      try {
+        const targetUrl = `${proxy}${encodeURIComponent(url)}`;
+        const res = await fetch(targetUrl);
+        if (!res.ok) continue;
+
+        let blob: Blob;
+        if (proxy.includes('allorigins')) {
+          const json = await res.json();
+          const base64Content = json.contents.split(',')[1] || json.contents;
+          return { data: base64Content, mimeType: 'image/jpeg' };
+        } else {
+          blob = await res.blob();
+          const reader = new FileReader();
+          return await new Promise((resolve) => {
+            reader.onloadend = () => {
+              const base64 = (reader.result as string).split(',')[1];
+              resolve({ data: base64, mimeType: blob.type || 'image/jpeg' });
+            };
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch (e) {
+        console.warn("Image proxy failed:", proxy);
+      }
+    }
+    return null;
+  }
+
   async searchAddress(query: string): Promise<{ lat: number; lng: number; label: string } | null> {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `Find the exact latitude and longitude for the address: "${query}" in New Zealand. Return only a JSON object like {"lat": -36.8, "lng": 174.7, "label": "Address Name"}.`,
-        config: {
-          tools: [{ googleMaps: {} }]
-          // responseMimeType and responseSchema removed as they are prohibited with googleMaps tool
-        }
+        contents: `Find the exact latitude and longitude for: "${query}" in New Zealand. Return only a JSON object: {"lat": -36.8, "lng": 174.7, "label": "Address Name"}.`,
+        config: { tools: [{ googleMaps: {} }] }
       });
-      // Extracting JSON from text response as grounding tools don't support structured output config
       const text = response.text || '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
     } catch (e) {
-      console.error("Address search failed:", e);
       return null;
     }
   }
@@ -44,29 +76,22 @@ export class GeminiService {
     if (cached) return cached;
 
     try {
+      const imageData = await this.fetchImageAsBase64(imageUrl);
       const parts: any[] = [{ 
-        text: `Analyze this New Zealand traffic camera feed. 
-        You must classify the traffic density exactly as one of these: 'light', 'moderate', or 'heavy'.
-        Base your classification on vehicle density and spacing.
-        Provide a concise reasoning (max 10 words).` 
+        text: `Tactical Assessment: Analyze this traffic feed from New Zealand. 
+        Classify density: 'light', 'moderate', or 'heavy'. 
+        Be extremely concise (max 10 words logic).` 
       }];
 
-      try {
-        const response = await fetch(imageUrl);
-        const blob = await response.blob();
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(blob);
-        });
+      if (imageData) {
         parts.push({
           inlineData: {
-            mimeType: blob.type || 'image/jpeg',
-            data: base64
+            mimeType: imageData.mimeType,
+            data: imageData.data
           }
         });
-      } catch (e) {
-        parts[0].text += `\nReference Image URL: ${imageUrl}.`;
+      } else {
+        parts[0].text += `\nReference (External Feed): ${imageUrl}`;
       }
       
       const genResponse = await this.ai.models.generateContent({
@@ -94,7 +119,7 @@ export class GeminiService {
       this.setCache(cacheKey, result);
       return result;
     } catch (error) {
-      return { level: 'unknown', reasoning: 'Prediction offline.', timestamp: '' };
+      return { level: 'unknown', reasoning: 'Intelligence offline.', timestamp: '' };
     }
   }
 
@@ -102,16 +127,16 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Provide the current weather conditions at coordinates (${lat}, ${lng}) in New Zealand. Respond only with a JSON object.`,
+        contents: `Current weather at coordinates (${lat}, ${lng}), NZ. Use Google Search. JSON format.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              temp: { type: Type.STRING, description: "e.g. 18°C" },
-              condition: { type: Type.STRING, description: "e.g. Overcast" },
-              visibility: { type: Type.STRING, description: "e.g. Good" }
+              temp: { type: Type.STRING },
+              condition: { type: Type.STRING },
+              visibility: { type: Type.STRING }
             },
             required: ["temp", "condition", "visibility"]
           }
@@ -123,29 +148,11 @@ export class GeminiService {
     }
   }
 
-  async getTransportIntelligence(lat: number, lng: number): Promise<{ name: string; type: string; lat: number; lng: number }[]> {
-    try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Find major public transport hubs (train stations, ferry terminals) near (${lat}, ${lng}) in New Zealand. Return a JSON array of objects.`,
-        config: {
-          tools: [{ googleMaps: {} }]
-          // responseMimeType and responseSchema removed as they are prohibited with googleMaps tool
-        }
-      });
-      const text = response.text || '';
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
   async playBriefingAudio(text: string) {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say in a professional tactical voice: ${text}` }] }],
+        contents: [{ parts: [{ text: `Tactical briefing: ${text}` }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -167,7 +174,7 @@ export class GeminiService {
         source.start();
       }
     } catch (error) {
-      console.error("TTS failed:", error);
+      console.error("Audio uplink failed.");
     }
   }
 
@@ -198,7 +205,7 @@ export class GeminiService {
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-image-preview',
-        contents: { parts: [{ text: `A highly realistic New Zealand road scenario visualization: ${prompt}. Photorealistic, cinematic lighting, 8k.` }] },
+        contents: { parts: [{ text: `A highly realistic New Zealand road scenario visualization: ${prompt}. Photorealistic, 8k.` }] },
         config: {
           imageConfig: { aspectRatio: aspectRatio as any, imageSize: "1K" }
         },
@@ -209,9 +216,8 @@ export class GeminiService {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-      throw new Error("No image data returned");
+      throw new Error("Projection failed.");
     } catch (error: any) {
-      console.error("Image generation failed:", error);
       throw error;
     }
   }
@@ -220,15 +226,15 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Analyze the route from ${origin} to ${dest} in New Zealand. Base driving time is ${baseTime}. Predict an adjusted travel time accounting for potential congestion or future incidents. Respond with a JSON object.`,
+        contents: `Route: ${origin} to ${dest}, NZ. Base time: ${baseTime}. Predict congestion adjusted time using Google Search. JSON format.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              predictedTime: { type: Type.STRING, description: "Formatted time e.g. 45m" },
-              factor: { type: Type.STRING, description: "Brief explanation of the adjustment e.g. 'Peak hour flow'" }
+              predictedTime: { type: Type.STRING },
+              factor: { type: Type.STRING }
             },
             required: ['predictedTime', 'factor']
           }
@@ -236,7 +242,7 @@ export class GeminiService {
       });
       return JSON.parse(response.text || '{}');
     } catch (error) {
-      return { predictedTime: baseTime, factor: "Normal flow" };
+      return { predictedTime: baseTime, factor: "Stable flow" };
     }
   }
 
@@ -244,10 +250,10 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `I am planning a trip from ${origin} to ${dest} in New Zealand. OSRM estimates ${distance} and ${time}. Provide a tactical briefing under 50 words.`,
+        contents: `Tactical briefing for trip ${origin} to ${dest}, NZ. Params: ${distance}, ${time}. Max 40 words.`,
         config: { tools: [{ googleMaps: {} }] }
       });
-      return response.text || "Sync failed.";
+      return response.text || "Intelligence sync error.";
     } catch (error) {
       return "Unable to synchronize path intelligence.";
     }
@@ -257,7 +263,7 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `Identify routes and landmarks around ${cameraName} (${lat}, ${lng}).`,
+        contents: `Context around ${cameraName} (${lat}, ${lng}). Landmarks and routes.`,
         config: {
           tools: [{ googleMaps: {} }],
           toolConfig: { retrievalConfig: { latLng: { latitude: lat, longitude: lng } } }
@@ -265,9 +271,38 @@ export class GeminiService {
       });
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const links = chunks.filter((c: any) => c.maps).map((c: any) => ({ title: c.maps.title, uri: c.maps.uri }));
-      return { text: response.text || "No context found.", links };
+      return { text: response.text || "No sector data.", links };
     } catch (error) {
-      return { text: "Grounding unavailable.", links: [] };
+      return { text: "Grounding offline.", links: [] };
+    }
+  }
+
+  /**
+   * Fix: Added missing getTransportIntelligence method to fetch transport hubs near coordinates using Google Maps grounding.
+   */
+  async getTransportIntelligence(lat: number, lng: number): Promise<{ lat: number; lng: number; name: string }[]> {
+    try {
+      const response = await this.ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Identify major public transport hubs (train stations, ferry terminals, or bus interchanges) within 5km of coordinates (${lat}, ${lng}) in New Zealand. Return a JSON array of objects: [{"lat": number, "lng": number, "name": "string"}].`,
+        config: {
+          tools: [{ googleMaps: {} }],
+          toolConfig: {
+            retrievalConfig: {
+              latLng: {
+                latitude: lat,
+                longitude: lng
+              }
+            }
+          }
+        }
+      });
+      const text = response.text || '';
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    } catch (e) {
+      console.error("Transport intelligence failure", e);
+      return [];
     }
   }
 
@@ -275,7 +310,7 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Search for road incidents, accidents, or events near ${location}, ${region} NZ in the last 24h.`,
+        contents: `Urgent road incidents near ${location}, ${region} NZ last 24h.`,
         config: { tools: [{ googleSearch: {} }] }
       });
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -290,12 +325,12 @@ export class GeminiService {
     try {
       const response = await this.ai.models.generateContent({
         model: "gemini-3-pro-preview",
-        contents: `Strategic assessment for "${camera.name}" node in NZ matrix. Suggest structural optimizations.`,
+        contents: `Deep analysis for node "${camera.name}" in NZ traffic matrix. Structural optimization suggestions.`,
         config: { thinkingConfig: { thinkingBudget: 32768 } }
       });
-      return { response: response.text || "Error." };
+      return { response: response.text || "Logic error." };
     } catch (error) {
-      return { response: "Logic offline." };
+      return { response: "Reasoning logic offline." };
     }
   }
 }
