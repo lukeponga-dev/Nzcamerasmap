@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TrafficOS">
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3246/3246665.png">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -77,19 +77,24 @@
     }
   </style>
   <script type="importmap">
-  {
-    "imports": {
-      "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-      "react/": "https://esm.sh/react@^19.2.3/",
-      "react": "https://esm.sh/react@^19.2.3",
-      "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-      "leaflet": "https://esm.sh/leaflet@1.9.4"
-    }
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "leaflet": "https://esm.sh/leaflet@1.9.4",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
-  </script>
+}
+</script>
 </head>
 <body>
   <div id="root"></div>
+  <!-- Application Entry Point -->
+  <script type="module" src="/index.tsx"></script>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
@@ -97,15 +102,12 @@
     // Robust Service Worker registration to handle varying origin environments
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        // Use a relative path to sw.js. 
-        // In sandboxed environments like AI Studio, Service Workers may fail due to origin restrictions.
-        const swPath = 'sw.js'; 
+        const swPath = '/sw.js'; 
         navigator.serviceWorker.register(swPath)
           .then(reg => {
             console.log('Matrix Uplink (SW) Registered:', reg.scope);
           })
           .catch(err => {
-            // Gracefully handle origin/security errors common in cloud development environments
             if (err.name === 'SecurityError' || err.message.includes('origin')) {
               console.warn('Matrix Uplink (SW) Service Restricted: Offline capabilities disabled in this environment origin.');
             } else {
