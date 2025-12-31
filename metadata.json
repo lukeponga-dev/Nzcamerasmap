@@ -1,0 +1,8 @@
+{
+  "name": "Copy of Smart Traffic Watch",
+  "description": "A sophisticated traffic monitoring dashboard that uses Gemini AI to analyze live camera feeds for road congestion and integrates Google Maps grounding for localized traffic insights.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}
